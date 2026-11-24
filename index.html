@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="es-CL">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f4f6ff">
+<title>Mi calendario</title>
+<style>
+* { box-sizing: border-box }
+body { margin: 0; background: #f4f6ff; color: #161934; font: 1rem system-ui, sans-serif }
+main { width: min(100% - 2rem, 54rem); margin: 2rem auto 4rem }
+h1 { font-size: clamp(2rem, 7vw, 3.5rem); letter-spacing: -.05em; margin: 0 }
+h2 { font-size: 1.2rem; margin: 0 }
+header, .toolbar, .entry { display: flex; align-items: center; justify-content: space-between; gap: .6rem }
+section { margin-top: 1rem; background: white; border: 1px solid #e1e4f3; border-radius: 1.25rem; padding: clamp(.65rem, 3vw, 1.5rem) }
+button, input, select { font: inherit }
+button { min-height: 44px; border: 0; border-radius: .65rem; padding: .5rem .75rem; background: #eef0fb; color: #222654; cursor: pointer }
+button.primary, button[aria-pressed="true"] { background: #3f35b5; color: white }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid #776af0; outline-offset: 2px }
+.grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: .2rem; text-align: center }
+.week { margin: 1rem 0 .35rem; font-size: .875rem; color: #525777 }
+.day { position: relative; min-width: 0; min-height: clamp(44px, 8vw, 65px); padding: .45rem .1rem 1rem }
+.day[aria-current="date"] { box-shadow: inset 0 0 0 2px #9588ed }
+.day.has-items::after { content: ""; position: absolute; bottom: .35rem; left: calc(50% - .2rem); width: .4rem; height: .4rem; border-radius: 50%; background: currentColor }
+.month { text-transform: capitalize }
+.entry { border-top: 1px solid #e1e4f3; padding: .6rem 0; justify-content: flex-start }
+.entry > div { flex: 1; overflow-wrap: anywhere }
+.entry small { display: block; color: #525777; font-size: .875rem }
+.entry button { flex: none }
+.done strong { text-decoration: line-through }
+dialog { width: min(100% - 2rem, 28rem); border: 0; border-radius: 1.25rem; padding: 1.25rem; color: inherit }
+dialog::backdrop { background: #12143877 }
+form { display: grid; gap: .9rem }
+label { display: grid; gap: .3rem }
+label.check { display: flex; align-items: center }
+input:not([type="checkbox"]), select { width: 100%; min-width: 0; min-height: 44px; padding: .5rem; border: 1px solid #acb0ca; border-radius: .5rem; background: white; color: inherit }
+.actions { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: flex-end }
+#notice { color: #8f211e }
+@media (max-width: 420px) { .toolbar { flex-wrap: wrap } }
+</style>
+</head>
+<body>
+<main>
+  <header><h1>Mi calendario</h1><button class="primary" id="add">Agregar</button></header>
+  <p id="notice" role="status" hidden></p>
+  <section aria-labelledby="month">
+    <div class="toolbar">
+      <h2 id="month" class="month" aria-live="polite"></h2>
+      <div><button id="prev" aria-label="Mes anterior">‹</button> <button id="today">Hoy</button> <button id="next" aria-label="Mes siguiente">›</button></div>
+    </div>
+    <div class="grid week" aria-hidden="true"><span>Lun</span><span>Mar</span><span>Mié</span><span>Jue</span><span>Vie</span><span>Sáb</span><span>Dom</span></div>
+    <div class="grid" id="days"></div>
+  </section>
+  <section aria-labelledby="selected"><h2 id="selected"></h2><div id="entries"></div></section>
+  <section aria-labelledby="upcoming"><h2 id="upcoming">Próximos pendientes y eventos</h2><div id="agenda"></div></section>
+</main>
+<dialog id="editor" aria-labelledby="editor-title">
+  <form id="form">
+    <h2 id="editor-title">Agregar al calendario</h2>
+    <label>Título<input name="title" maxlength="120" required></label>
+    <label>Fecha<input name="date" type="date" min="0001-01-01" max="9999-12-31" required></label>
+    <label>Tipo<select name="type"><option value="task">Pendiente</option><option value="event">Evento</option></select></label>
+    <label class="check"><input name="important" type="checkbox"> Importante</label>
+    <p id="editor-error" role="status" hidden></p>
+    <div class="actions"><button type="button" id="delete" hidden>Eliminar</button><button type="button" id="cancel">Cancelar</button><button class="primary">Guardar</button></div>
+  </form>
+</dialog>
+<script>
+const byId = id => document.getElementById(id);
+const key = 'mi-calendario.v1';
+const monthFormat = new Intl.DateTimeFormat('es-CL', {month: 'long', year: 'numeric'});
+const dayFormat = new Intl.DateTimeFormat('es-CL', {weekday: 'long', day: 'numeric', month: 'long'});
+const fullDateFormat = new Intl.DateTimeFormat('es-CL', {dateStyle: 'full'});
+function dateKey(date) {
+  return [String(date.getFullYear()).padStart(4, '0'), date.getMonth() + 1, date.getDate()]
+    .map(part => String(part).padStart(2, '0')).join('-');
+}
+function parseDate(value) { return new Date(value + 'T12:00:00'); }
+function makeDate(year, month, day) {
+  const date = new Date(2000, 0, 1, 12);
+  date.setFullYear(year, month, day);
+  return date;
+}
+function message(id, value) {
+  const node = byId(id);
+  node.textContent = value;
+  node.hidden = !value;
+}
+let items = [];
+let selected = dateKey(new Date());
+let visibleMonth = parseDate(selected);
+let editing = null;
+const editor = byId('editor');
+const form = byId('form');
+try {
+  items = JSON.parse(localStorage.getItem(key) ?? '[]');
+  if (!Array.isArray(items)) throw new Error('Formato inválido');
+} catch {
+  items = [];
+  message('notice', 'No se pudieron cargar los datos guardados.');
+}
+function save(nextItems) {
+  const target = editor.open ? 'editor-error' : 'notice';
+  try {
+    localStorage.setItem(key, JSON.stringify(nextItems));
+  } catch {
+    message(target, 'El navegador no pudo guardar el cambio. Revisa si el almacenamiento está habilitado.');
+    return false;
+  }
+  items = nextItems;
+  message(target, '');
+  return true;
+}
+function button(label, act) {
+  const node = document.createElement('button');
+  node.type = 'button';
+  node.textContent = label;
+  node.addEventListener('click', act);
+  return node;
+}
+function renderList(id, records, empty, showDate) {
+  const list = byId(id);
+  list.replaceChildren();
+  if (!records.length) {
+    const text = document.createElement('p');
+    text.textContent = empty;
+    list.append(text);
+  }
+  for (const item of records) {
+    const row = document.createElement('div');
+    row.className = item.done ? 'entry done' : 'entry';
+    const details = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = item.title;
+    const meta = document.createElement('small');
+    meta.textContent = [showDate && fullDateFormat.format(parseDate(item.date)),
+      item.type === 'event' ? 'Evento' : item.done ? 'Completado' : 'Pendiente',
+      item.important && 'Importante'].filter(Boolean).join(' · ');
+    details.append(title, meta);
+    row.append(details);
+    if (item.type === 'task') {
+      const toggle = button(item.done ? '↶' : '✓', () => {
+        if (save(items.map(entry => entry.id === item.id ? {...entry, done: !entry.done} : entry))) render();
+      });
+      toggle.setAttribute('aria-label', (item.done ? 'Reabrir ' : 'Completar ') + item.title);
+      row.append(toggle);
+    }
+    const edit = button('Editar', () => openEditor(item));
+    edit.setAttribute('aria-label', 'Editar ' + item.title);
+    row.append(edit);
+    list.append(row);
+  }
+}
+function render(focusDay = false) {
+  const now = dateKey(new Date());
+  byId('month').textContent = monthFormat.format(visibleMonth);
+  const year = visibleMonth.getFullYear();
+  const month = visibleMonth.getMonth();
+  byId('prev').disabled = year === 1 && month === 0;
+  byId('next').disabled = year === 9999 && month === 11;
+  const first = makeDate(year, month, 1);
+  const count = makeDate(year, month + 1, 0).getDate();
+  const days = byId('days');
+  days.replaceChildren();
+  const populated = new Set(items.map(item => item.date));
+  for (let offset = (first.getDay() + 6) % 7; offset > 0; offset--) {
+    days.append(document.createElement('span'));
+  }
+  for (let number = 1; number <= count; number++) {
+    const date = makeDate(year, month, number);
+    const value = dateKey(date);
+    const day = button(number, () => { selected = value; render(true); });
+    day.className = populated.has(value) ? 'day has-items' : 'day';
+    day.setAttribute('aria-label', fullDateFormat.format(date) + (populated.has(value) ? ', con actividades' : ''));
+    day.setAttribute('aria-pressed', String(value === selected));
+    if (value === now) day.setAttribute('aria-current', 'date');
+    days.append(day);
+    if (focusDay && value === selected) day.focus();
+  }
+  byId('selected').textContent = dayFormat.format(parseDate(selected));
+  renderList('entries', items.filter(item => item.date === selected), 'Sin actividades para este día.', false);
+  const upcoming = items.filter(item => !item.done && item.date >= now)
+    .sort((a, b) => a.date.localeCompare(b.date) || Number(b.important) - Number(a.important));
+  renderList('agenda', upcoming, 'Sin próximos pendientes ni eventos.', true);
+}
+function navigate(year, month) {
+  visibleMonth = makeDate(year, month, 1);
+  selected = dateKey(visibleMonth);
+  render();
+}
+function openEditor(item = null) {
+  editing = item;
+  form.reset();
+  form.elements.title.value = item?.title ?? '';
+  form.elements.date.value = item?.date ?? selected;
+  form.elements.type.value = item?.type ?? 'task';
+  form.elements.important.checked = item?.important ?? false;
+  byId('editor-title').textContent = item ? 'Editar actividad' : 'Agregar al calendario';
+  byId('delete').hidden = !item;
+  message('editor-error', '');
+  editor.showModal();
+  form.elements.title.focus();
+}
+byId('add').onclick = () => openEditor();
+byId('prev').onclick = () => navigate(visibleMonth.getFullYear(), visibleMonth.getMonth() - 1);
+byId('next').onclick = () => navigate(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1);
+byId('today').onclick = () => { visibleMonth = new Date(); selected = dateKey(visibleMonth); render(); };
+byId('cancel').onclick = () => editor.close();
+byId('delete').onclick = () => {
+  if (editing && confirm('¿Eliminar esta actividad?') && save(items.filter(item => item.id !== editing.id))) {
+    editor.close();
+    render();
+  }
+};
+form.addEventListener('submit', event => {
+  event.preventDefault();
+  const title = form.elements.title.value.trim();
+  if (!title) { message('editor-error', 'Escribe un título.'); form.elements.title.focus(); return; }
+  const type = form.elements.type.value;
+  const item = {
+    id: editing?.id ?? (globalThis.crypto?.randomUUID?.() ?? Date.now() + '-' + Math.random()),
+    title,
+    date: form.elements.date.value,
+    type,
+    important: form.elements.important.checked,
+    done: type === 'task' && (editing?.done ?? false)
+  };
+  const nextItems = editing ? items.map(entry => entry.id === item.id ? item : entry) : [...items, item];
+  if (!save(nextItems)) return;
+  selected = item.date;
+  visibleMonth = parseDate(selected);
+  editor.close();
+  render();
+});
+render();
+</script>
+</body>
+</html>
