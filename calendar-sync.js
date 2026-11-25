@@ -25,7 +25,6 @@
     await loadClient();
     const client = window.supabase.createClient(url, publishableKey);
     const table = () => client.from('calendar_items');
-    const owned = (query, userId) => query.eq('user_id', userId);
     return {
       onSession: callback => client.auth.onAuthStateChange((event, session) => callback(session)),
       signIn: (email, password) => client.auth.signInWithPassword({email, password}).then(result),
@@ -38,18 +37,18 @@
         }
       }).then(result),
       signOut: () => client.auth.signOut({scope: 'local'}).then(result),
-      async subscribe(userId, onChange, onStatus) {
+      async subscribe(onChange, onStatus) {
         await client.realtime.setAuth();
-        const channel = client.channel('calendar:' + userId, {config: {private: true}})
+        const channel = client.channel('calendar:shared', {config: {private: true}})
           .on('broadcast', {event: 'changed'}, onChange)
           .subscribe(onStatus);
         return () => client.removeChannel(channel);
       },
-      async read(userId) {
+      async read() {
         const rows = [];
         let lastId;
         while (true) {
-          let query = owned(table().select(fields), userId).order('id').limit(500);
+          let query = table().select(fields).order('id').limit(500);
           if (lastId !== undefined) query = query.gt('id', lastId);
           const page = result(await query);
           if (!page.length) return rows;
@@ -57,18 +56,18 @@
           lastId = page[page.length - 1].id;
         }
       },
-      async insert(userId, item) {
-        return result(await table().insert({...item, user_id: userId}).select(fields).single());
+      async insert(item) {
+        return result(await table().insert(item).select(fields).single());
       },
-      async update(userId, id, changes) {
-        return result(await owned(table().update(changes), userId).eq('id', id).select(fields).single());
+      async update(id, changes) {
+        return result(await table().update(changes).eq('id', id).select(fields).single());
       },
-      async remove(userId, id) {
-        result(await owned(table().delete(), userId).eq('id', id).select('id').single());
+      async remove(id) {
+        result(await table().delete().eq('id', id).select('id').single());
       },
-      async import(userId, items) {
-        result(await table().upsert(items.map(item => ({...item, user_id: userId})), {
-          onConflict: 'user_id,id',
+      async import(items) {
+        result(await table().upsert(items, {
+          onConflict: 'id',
           ignoreDuplicates: true
         }));
       }

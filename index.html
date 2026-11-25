@@ -98,7 +98,7 @@ button:disabled { cursor: default; opacity: .65 }
   </form>
 </dialog>
 <script src="./calendar-config.js"></script>
-<script src="./calendar-sync.js?v=3"></script>
+<script src="./calendar-sync.js?v=4"></script>
 <script>
 const byId = id => document.getElementById(id);
 const key = 'mi-calendario.v1';
@@ -204,9 +204,9 @@ function updateSyncControls() {
   passwordButton.disabled = busy;
   let status = connecting ? 'Conectando con Supabase…' : 'Solo en este navegador';
   if (account) {
-    if (cloudStatus === 'loading') status = 'Cargando pendientes de la cuenta…';
+    if (cloudStatus === 'loading') status = 'Cargando calendario compartido…';
     else if (cloudStatus === 'error') status = 'Sesión iniciada. Error al cargar pendientes.';
-    else status = live ? 'Sincronización en tiempo real activa' : 'Pendientes cargados. Reconectando en tiempo real…';
+    else status = live ? 'Calendario compartido · Sincronización en tiempo real activa' : 'Pendientes cargados. Reconectando en tiempo real…';
     status += ' · ' + account.email;
   }
   message('sync-status', status);
@@ -227,7 +227,7 @@ async function reloadCloud() {
   const userId = account.id;
   const request = ++loadNumber;
   try {
-    const data = await sync.read(userId);
+    const data = await sync.read();
     if (request !== loadNumber || account?.id !== userId) return;
     items = data;
     cloudStatus = 'ready';
@@ -268,7 +268,7 @@ async function changeSession(user) {
 
   reloadCloud();
   try {
-    const close = await sync.subscribe(user.id, reloadCloud, status => {
+    const close = await sync.subscribe(reloadCloud, status => {
       if (account?.id !== user.id) return;
       live = status === 'SUBSCRIBED';
       updateSyncControls();
@@ -294,11 +294,11 @@ async function mutate(operation, id, values, onDone) {
   try {
     if (userId) {
       if (operation === 'remove') {
-        await sync.remove(userId, id);
+        await sync.remove(id);
       } else {
         values = operation === 'insert'
-          ? await sync.insert(userId, {id, ...values})
-          : await sync.update(userId, id, values);
+          ? await sync.insert({id, ...values})
+          : await sync.update(id, values);
       }
       if (account?.id !== userId) return;
       ++loadNumber;
@@ -525,13 +525,13 @@ passwordForm.addEventListener('submit', async event => {
   }
 });
 byId('import-local').onclick = async () => {
-  if (!account || busy || !confirm('¿Copiar los pendientes de este navegador a tu cuenta?')) return;
+  if (!account || busy || !confirm('¿Copiar los pendientes de este navegador al calendario compartido?')) return;
   const userId = account.id;
   busy = true;
   updateSyncControls();
   try {
     const local = readLocal();
-    await sync.import(userId, local);
+    await sync.import(local);
     if (account?.id !== userId) return;
     const imported = new Map(local.map(item => [item.id, JSON.stringify(item)]));
     const remaining = readLocal().filter(item => imported.get(item.id) !== JSON.stringify(item));
