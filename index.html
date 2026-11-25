@@ -3,108 +3,71 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#f4f6ff">
+<meta name="theme-color" content="#f3f1f8">
 <title>Mi calendario</title>
-<style>
-* { box-sizing: border-box }
-body { margin: 0; background: #f4f6ff; color: #161934; font: 1rem system-ui, sans-serif }
-main { width: min(100% - 2rem, 54rem); margin: 2rem auto 4rem }
-h1 { font-size: clamp(2rem, 7vw, 3.5rem); letter-spacing: -.05em; margin: 0 }
-h2 { font-size: 1.2rem; margin: 0 }
-header, .toolbar, .entry { display: flex; align-items: center; justify-content: space-between; gap: .6rem }
-section { margin-top: 1rem; background: white; border: 1px solid #e1e4f3; border-radius: 1.25rem; padding: clamp(.65rem, 3vw, 1.5rem) }
-button, input, select { font: inherit }
-button { min-height: 44px; border: 0; border-radius: .65rem; padding: .5rem .75rem; background: #eef0fb; color: #222654; cursor: pointer }
-button.primary, button[aria-pressed="true"] { background: #3f35b5; color: white }
-button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid #776af0; outline-offset: 2px }
-.grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: .2rem; text-align: center }
-.week { margin: 1rem 0 .35rem; font-size: .875rem; color: #525777 }
-.day { position: relative; min-width: 0; min-height: clamp(44px, 8vw, 65px); padding: .45rem .1rem 1rem }
-.day[aria-current="date"] { box-shadow: inset 0 0 0 2px #9588ed }
-.day.has-items::after { content: ""; position: absolute; bottom: .35rem; left: calc(50% - .2rem); width: .4rem; height: .4rem; border-radius: 50%; background: currentColor }
-.month { text-transform: capitalize }
-.entry { border-top: 1px solid #e1e4f3; padding: .6rem 0; justify-content: flex-start }
-.entry > div { flex: 1; overflow-wrap: anywhere }
-.entry small { display: block; color: #525777; font-size: .875rem }
-.entry button { flex: none }
-.done strong { text-decoration: line-through }
-dialog { width: min(100% - 2rem, 28rem); border: 0; border-radius: 1.25rem; padding: 1.25rem; color: inherit }
-dialog::backdrop { background: #12143877 }
-form { display: grid; gap: .9rem }
-label { display: grid; gap: .3rem }
-label.check { display: flex; align-items: center }
-input:not([type="checkbox"]), select { width: 100%; min-width: 0; min-height: 44px; padding: .5rem; border: 1px solid #acb0ca; border-radius: .5rem; background: white; color: inherit }
-.password-field { display: grid; gap: .3rem }
-.password-input { position: relative }
-.password-input input { padding-inline-end: 3.25rem }
-.password-toggle {
-  position: absolute;
-  inset-block-start: 0;
-  inset-inline-end: 0;
-  width: 44px;
-  height: 100%;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  background: transparent;
-}
-.password-eye {
-  display: grid;
-  place-items: center;
-  width: 1rem;
-  height: 1rem;
-  border: 2px solid currentColor;
-  border-radius: 75% 10%;
-  transform: rotate(45deg);
-}
-.password-eye::after {
-  content: "";
-  width: .36rem;
-  height: .36rem;
-  border-radius: 50%;
-  background: currentColor;
-}
-.password-toggle[data-visible]::after {
-  content: "";
-  position: absolute;
-  width: 1.35rem;
-  height: 2px;
-  background: currentColor;
-  box-shadow: 0 -2px white;
-  transform: rotate(-45deg);
-}
-.actions { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: flex-end }
-#notice, #cloud-error, #editor-error, #auth-link-error { color: #8f211e }
-#sync-controls { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-top: .75rem }
-#sync-controls[hidden] { display: none }
-#sync-status { flex: 1 1 12rem; margin: .25rem 0; overflow-wrap: anywhere; color: #525777 }
-#auth-message, #password-message { margin: 0; overflow-wrap: anywhere }
-button:disabled { cursor: default; opacity: .65 }
-@media (max-width: 420px) { .toolbar { flex-wrap: wrap } }
-</style>
+<script>
+  (() => {
+    let preference;
+    try { preference = localStorage.getItem('mi-calendario.theme'); } catch {}
+    document.documentElement.dataset.theme = preference === 'dark' || preference === 'light'
+      ? preference
+      : window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  })();
+</script>
+<link rel="stylesheet" href="./calendar.css?v=1">
 </head>
 <body>
+<header class="app-header">
+  <div class="header-inner">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"><span class="calendar-icon"></span></span>
+      <h1>Mi calendario</h1>
+    </div>
+    <div class="header-actions">
+      <button class="theme-switch" id="theme-switch" type="button" role="switch" aria-checked="false" aria-label="Modo oscuro">
+        <span class="theme-label" aria-hidden="true">Modo oscuro</span>
+        <span class="theme-track" aria-hidden="true"><span class="theme-thumb" id="theme-icon">☀</span></span>
+      </button>
+      <button class="primary" id="add"><span aria-hidden="true">+</span> Agregar</button>
+    </div>
+  </div>
+</header>
 <main>
-  <header><h1>Mi calendario</h1><button class="primary" id="add">Agregar</button></header>
   <div id="sync-controls" hidden>
     <p id="sync-status" role="status"></p>
-    <button id="import-local" type="button" hidden>Importar pendientes de este navegador</button>
-    <button id="change-password" type="button" hidden>Cambiar contraseña</button>
-    <button id="account" type="button">Iniciar sesión</button>
+    <div id="sync-actions">
+      <button id="import-local" type="button" hidden>Importar pendientes de este navegador</button>
+      <button id="change-password" type="button" hidden>Cambiar contraseña</button>
+      <button id="account" type="button">Iniciar sesión</button>
+    </div>
   </div>
   <p id="notice" role="status" hidden></p>
   <p id="cloud-error" role="status" hidden></p>
   <p id="auth-link-error" role="status" hidden></p>
-  <section aria-labelledby="month">
-    <div class="toolbar">
-      <h2 id="month" class="month" aria-live="polite"></h2>
-      <div><button id="prev" aria-label="Mes anterior">‹</button> <button id="today">Hoy</button> <button id="next" aria-label="Mes siguiente">›</button></div>
+  <div class="workspace">
+    <section class="panel calendar-panel" aria-labelledby="month">
+      <div class="toolbar">
+        <h2 id="month" class="month" aria-live="polite"></h2>
+        <div class="month-controls">
+          <button class="month-step" id="prev" aria-label="Mes anterior">‹</button>
+          <button id="today">Hoy</button>
+          <button class="month-step" id="next" aria-label="Mes siguiente">›</button>
+        </div>
+      </div>
+      <div class="grid week" aria-hidden="true"><span>Lun</span><span>Mar</span><span>Mié</span><span>Jue</span><span>Vie</span><span>Sáb</span><span>Dom</span></div>
+      <div class="grid" id="days"></div>
+    </section>
+    <div class="agenda-column">
+      <section class="panel agenda-panel" aria-labelledby="selected">
+        <div class="panel-heading"><h2 id="selected"></h2><span class="counter" id="entry-count" hidden></span></div>
+        <div id="entries"></div>
+      </section>
+      <section class="panel agenda-panel" aria-labelledby="upcoming">
+        <div class="panel-heading"><h2 id="upcoming">Próximas actividades</h2><span class="counter" id="agenda-count" hidden></span></div>
+        <div id="agenda"></div>
+      </section>
     </div>
-    <div class="grid week" aria-hidden="true"><span>Lun</span><span>Mar</span><span>Mié</span><span>Jue</span><span>Vie</span><span>Sáb</span><span>Dom</span></div>
-    <div class="grid" id="days"></div>
-  </section>
-  <section aria-labelledby="selected"><h2 id="selected"></h2><div id="entries"></div></section>
-  <section aria-labelledby="upcoming"><h2 id="upcoming">Próximos pendientes y eventos</h2><div id="agenda"></div></section>
+  </div>
 </main>
 <dialog id="editor" aria-labelledby="editor-title">
   <form id="form">
@@ -149,6 +112,28 @@ button:disabled { cursor: default; opacity: .65 }
 <script>
 const byId = id => document.getElementById(id);
 const key = 'mi-calendario.v1';
+const themeKey = 'mi-calendario.theme';
+const themeSwitch = byId('theme-switch');
+const systemTheme = window.matchMedia?.('(prefers-color-scheme: dark)');
+let preferredTheme;
+try { preferredTheme = localStorage.getItem(themeKey); } catch {}
+
+function applyTheme(theme) {
+  const dark = theme === 'dark';
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  themeSwitch.setAttribute('aria-checked', String(dark));
+  byId('theme-icon').textContent = dark ? '☾' : '☀';
+  document.querySelector('meta[name="theme-color"]').content = dark ? '#15121c' : '#f3f1f8';
+}
+applyTheme(document.documentElement.dataset.theme);
+themeSwitch.onclick = () => {
+  preferredTheme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  applyTheme(preferredTheme);
+  try { localStorage.setItem(themeKey, preferredTheme); } catch {}
+};
+systemTheme?.addEventListener?.('change', event => {
+  if (preferredTheme !== 'dark' && preferredTheme !== 'light') applyTheme(event.matches ? 'dark' : 'light');
+});
 const monthFormat = new Intl.DateTimeFormat('es-CL', {month: 'long', year: 'numeric'});
 const dayFormat = new Intl.DateTimeFormat('es-CL', {weekday: 'long', day: 'numeric', month: 'long'});
 const fullDateFormat = new Intl.DateTimeFormat('es-CL', {dateStyle: 'full'});
@@ -389,6 +374,7 @@ function renderList(id, records, empty, showDate) {
   list.replaceChildren();
   if (!records.length) {
     const text = document.createElement('p');
+    text.className = 'empty-state';
     text.textContent = empty;
     list.append(text);
   }
@@ -406,6 +392,7 @@ function renderList(id, records, empty, showDate) {
     row.append(details);
     if (item.type === 'task') {
       const toggle = button(item.done ? '↶' : '✓', () => mutate('update', item.id, {done: !item.done}));
+      toggle.className = 'complete-task';
       toggle.setAttribute('aria-label', (item.done ? 'Reabrir ' : 'Completar ') + item.title);
       row.append(toggle);
     }
@@ -415,11 +402,55 @@ function renderList(id, records, empty, showDate) {
     list.append(row);
   }
 }
+function countLabel(id, count) {
+  message(id, count ? String(count) : '');
+  byId(id).setAttribute('aria-label', count === 1 ? '1 actividad' : count + ' actividades');
+}
+
+function calendarDay(date, records) {
+  const value = dateKey(date);
+  const day = button('', () => { selected = value; render(true); });
+  day.className = records.length ? 'day has-items' : 'day';
+  day.dataset.date = value;
+  day.setAttribute('aria-label', fullDateFormat.format(date)
+    + (records.length === 1 ? ', 1 actividad' : records.length ? ', ' + records.length + ' actividades' : ''));
+  day.setAttribute('aria-pressed', String(value === selected));
+  day.tabIndex = value === selected ? 0 : -1;
+
+  const number = document.createElement('span');
+  number.className = 'day-number';
+  number.textContent = date.getDate();
+  day.append(number);
+  if (records.length) {
+    const preview = document.createElement('span');
+    preview.className = 'day-preview';
+    preview.setAttribute('aria-hidden', 'true');
+    for (const item of records.slice(0, 2)) {
+      const chip = document.createElement('span');
+      chip.className = ['day-chip', item.type, item.important && 'important', item.done && 'done'].filter(Boolean).join(' ');
+      chip.textContent = item.title;
+      preview.append(chip);
+    }
+    if (records.length > 2) {
+      const more = document.createElement('span');
+      more.className = 'day-more';
+      more.textContent = '+' + (records.length - 2);
+      preview.append(more);
+    }
+    day.append(preview);
+  }
+  return day;
+}
+
+function capitalize(text) {
+  return text.charAt(0).toLocaleUpperCase('es-CL') + text.slice(1);
+}
+
 function render(focusDay = false) {
   updateSyncControls();
   byId('add').disabled = connecting;
   const now = dateKey(new Date());
-  byId('month').textContent = monthFormat.format(visibleMonth);
+  byId('month').textContent = capitalize(monthFormat.format(visibleMonth));
   const year = visibleMonth.getFullYear();
   const month = visibleMonth.getMonth();
   byId('prev').disabled = year === 1 && month === 0;
@@ -427,28 +458,53 @@ function render(focusDay = false) {
   const first = makeDate(year, month, 1);
   const count = makeDate(year, month + 1, 0).getDate();
   const days = byId('days');
+  const focusDate = focusDay ? selected : days.contains(document.activeElement) ? document.activeElement.dataset.date : '';
   days.replaceChildren();
-  const populated = new Set(items.map(item => item.date));
-  for (let offset = (first.getDay() + 6) % 7; offset > 0; offset--) {
-    days.append(document.createElement('span'));
+  const byDate = new Map();
+  for (const item of items) {
+    if (!byDate.has(item.date)) byDate.set(item.date, []);
+    byDate.get(item.date).push(item);
   }
-  for (let number = 1; number <= count; number++) {
-    const date = makeDate(year, month, number);
+  const leading = (first.getDay() + 6) % 7;
+  const trailing = (7 - (leading + count) % 7) % 7;
+  for (let index = 0; index < leading + count + trailing; index++) {
+    if (index < leading || index >= leading + count) {
+      const blank = document.createElement('span');
+      blank.className = 'calendar-blank';
+      blank.setAttribute('aria-hidden', 'true');
+      days.append(blank);
+      continue;
+    }
+    const date = makeDate(year, month, index - leading + 1);
     const value = dateKey(date);
-    const day = button(number, () => { selected = value; render(true); });
-    day.className = populated.has(value) ? 'day has-items' : 'day';
-    day.setAttribute('aria-label', fullDateFormat.format(date) + (populated.has(value) ? ', con actividades' : ''));
-    day.setAttribute('aria-pressed', String(value === selected));
+    const day = calendarDay(date, byDate.get(value) ?? []);
     if (value === now) day.setAttribute('aria-current', 'date');
     days.append(day);
-    if (focusDay && value === selected) day.focus();
+    if (value === focusDate) day.focus();
   }
-  byId('selected').textContent = dayFormat.format(parseDate(selected));
-  renderList('entries', items.filter(item => item.date === selected), 'Sin actividades para este día.', false);
+  byId('selected').textContent = capitalize(dayFormat.format(parseDate(selected)));
+  const selectedItems = byDate.get(selected) ?? [];
+  countLabel('entry-count', selectedItems.length);
+  renderList('entries', selectedItems, 'Sin actividades para este día.', false);
   const upcoming = items.filter(item => !item.done && item.date >= now)
     .sort((a, b) => a.date.localeCompare(b.date) || Number(b.important) - Number(a.important));
+  countLabel('agenda-count', upcoming.length);
   renderList('agenda', upcoming, 'Sin próximos pendientes ni eventos.', true);
 }
+
+const dayOffsets = {ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7};
+byId('days').addEventListener('keydown', event => {
+  const day = event.target.closest('[data-date]');
+  if (!day || !Object.hasOwn(dayOffsets, event.key) || event.altKey || event.ctrlKey || event.metaKey) return;
+  event.preventDefault();
+  const date = parseDate(day.dataset.date);
+  const next = makeDate(date.getFullYear(), date.getMonth(), date.getDate() + dayOffsets[event.key]);
+  if (next.getFullYear() < 1 || next.getFullYear() > 9999) return;
+  selected = dateKey(next);
+  visibleMonth = next;
+  render(true);
+});
+
 function navigate(year, month) {
   visibleMonth = makeDate(year, month, 1);
   selected = dateKey(visibleMonth);
@@ -607,7 +663,12 @@ byId('import-local').onclick = async () => {
 };
 
 window.addEventListener('storage', event => {
-  if (event.key !== key) return;
+  if (event.key === themeKey || event.key === null) {
+    preferredTheme = event.newValue;
+    const fallback = systemTheme?.matches ? 'dark' : 'light';
+    applyTheme(preferredTheme === 'dark' || preferredTheme === 'light' ? preferredTheme : fallback);
+  }
+  if (event.key !== key && event.key !== null) return;
   if (!account) {
     loadLocal();
     render();
