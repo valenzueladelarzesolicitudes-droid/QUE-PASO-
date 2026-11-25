@@ -35,14 +35,25 @@ label { display: grid; gap: .3rem }
 label.check { display: flex; align-items: center }
 input:not([type="checkbox"]), select { width: 100%; min-width: 0; min-height: 44px; padding: .5rem; border: 1px solid #acb0ca; border-radius: .5rem; background: white; color: inherit }
 .actions { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: flex-end }
-#notice { color: #8f211e }
+#notice, #cloud-error, #editor-error { color: #8f211e }
+#sync-controls { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-top: .75rem }
+#sync-controls[hidden] { display: none }
+#sync-status { flex: 1 1 12rem; margin: .25rem 0; overflow-wrap: anywhere; color: #525777 }
+#auth-message { margin: 0; overflow-wrap: anywhere }
+button:disabled { cursor: default; opacity: .65 }
 @media (max-width: 420px) { .toolbar { flex-wrap: wrap } }
 </style>
 </head>
 <body>
 <main>
   <header><h1>Mi calendario</h1><button class="primary" id="add">Agregar</button></header>
+  <div id="sync-controls" hidden>
+    <p id="sync-status" role="status"></p>
+    <button id="import-local" type="button" hidden>Importar pendientes de este navegador</button>
+    <button id="account" type="button">Sincronizar</button>
+  </div>
   <p id="notice" role="status" hidden></p>
+  <p id="cloud-error" role="status" hidden></p>
   <section aria-labelledby="month">
     <div class="toolbar">
       <h2 id="month" class="month" aria-live="polite"></h2>
@@ -62,9 +73,20 @@ input:not([type="checkbox"]), select { width: 100%; min-width: 0; min-height: 44
     <label>Tipo<select name="type"><option value="task">Pendiente</option><option value="event">Evento</option></select></label>
     <label class="check"><input name="important" type="checkbox"> Importante</label>
     <p id="editor-error" role="status" hidden></p>
-    <div class="actions"><button type="button" id="delete" hidden>Eliminar</button><button type="button" id="cancel">Cancelar</button><button class="primary">Guardar</button></div>
+    <div class="actions"><button type="button" id="delete" hidden>Eliminar</button><button type="button" id="cancel">Cancelar</button><button class="primary" id="save">Guardar</button></div>
   </form>
 </dialog>
+<dialog id="auth" aria-labelledby="auth-title">
+  <form id="auth-form">
+    <h2 id="auth-title">Sincroniza tu calendario</h2>
+    <p>Usa el mismo correo en el celular y el computador.</p>
+    <label>Correo electrónico<input name="email" type="email" autocomplete="email" required></label>
+    <p id="auth-message" role="status" hidden></p>
+    <div class="actions"><button type="button" id="auth-close">Cerrar</button><button class="primary" id="auth-submit">Enviar enlace</button></div>
+  </form>
+</dialog>
+<script src="./calendar-config.js"></script>
+<script src="./calendar-sync.js"></script>
 <script>
 const byId = id => document.getElementById(id);
 const key = 'mi-calendario.v1';
@@ -92,24 +114,153 @@ let visibleMonth = parseDate(selected);
 let editing = null;
 const editor = byId('editor');
 const form = byId('form');
-try {
-  items = JSON.parse(localStorage.getItem(key) ?? '[]');
-  if (!Array.isArray(items)) throw new Error('Formato inválido');
-} catch {
-  items = [];
-  message('notice', 'No se pudieron cargar los datos guardados.');
+let sync;
+let account = null;
+let stopUpdates;
+let live = false;
+let busy = false;
+let loadNumber = 0;
+let connecting = Boolean(window.connectCalendar);
+const auth = byId('auth');
+
+function readLocal() {
+  const stored = JSON.parse(localStorage.getItem(key) ?? '[]');
+  if (!Array.isArray(stored)) throw new Error('Formato inválido');
+  return stored;
 }
-function save(nextItems) {
-  const target = editor.open ? 'editor-error' : 'notice';
+
+function loadLocal() {
   try {
-    localStorage.setItem(key, JSON.stringify(nextItems));
+    items = readLocal();
   } catch {
-    message(target, 'El navegador no pudo guardar el cambio. Revisa si el almacenamiento está habilitado.');
-    return false;
+    items = [];
+    message('notice', 'No se pudieron cargar los datos guardados.');
   }
-  items = nextItems;
-  message(target, '');
-  return true;
+}
+
+function updateSyncControls() {
+  if (!window.connectCalendar) return;
+  byId('sync-controls').hidden = false;
+  const accountButton = byId('account');
+  accountButton.disabled = connecting || !sync || busy;
+  accountButton.textContent = account ? 'Cerrar sesión' : 'Sincronizar';
+  const status = account
+    ? (live ? 'Sincronización en tiempo real activa' : 'Reconectando la sincronización') + ' · ' + account.email
+    : connecting ? 'Conectando con Supabase…' : 'Solo en este navegador';
+  message('sync-status', status);
+  const importButton = byId('import-local');
+  importButton.hidden = true;
+  if (account) {
+    try {
+      importButton.hidden = !readLocal().length;
+    } catch {
+      message('notice', 'No se pudieron leer los pendientes de este navegador.');
+    }
+  }
+  importButton.disabled = busy;
+}
+
+async function reloadCloud() {
+  if (!account) return;
+  const userId = account.id;
+  const request = ++loadNumber;
+  try {
+    const data = await sync.read(userId);
+    if (request !== loadNumber || account?.id !== userId) return;
+    items = data;
+    message('cloud-error', '');
+    render();
+  } catch {
+    if (request === loadNumber && account?.id === userId) {
+      message('cloud-error', 'No se pudo actualizar el calendario. Se volverá a intentar.');
+    }
+  }
+}
+
+async function changeSession(user) {
+  const starting = connecting;
+  connecting = false;
+  if (!starting && user?.id === account?.id) {
+    updateSyncControls();
+    return;
+  }
+  ++loadNumber;
+  stopUpdates?.();
+  stopUpdates = undefined;
+  account = user;
+  live = false;
+  if (editor.open) editor.close();
+  if (auth.open) auth.close();
+  message('notice', '');
+  message('cloud-error', '');
+  items = [];
+  if (!user) loadLocal();
+  render();
+  if (!user) return;
+
+  reloadCloud();
+  try {
+    const close = await sync.subscribe(user.id, reloadCloud, status => {
+      if (account?.id !== user.id) return;
+      live = status === 'SUBSCRIBED';
+      updateSyncControls();
+      if (live) reloadCloud();
+    });
+    if (account?.id === user.id) stopUpdates = close;
+    else close();
+  } catch {
+    if (account?.id === user.id) {
+      message('cloud-error', 'La conexión en tiempo real falló. El calendario se seguirá actualizando periódicamente.');
+    }
+  }
+}
+
+async function mutate(operation, id, values, onDone) {
+  if (busy || connecting) return;
+  const userId = account?.id;
+  const target = editor.open ? 'editor-error' : 'notice';
+  busy = true;
+  updateSyncControls();
+  byId('save').disabled = true;
+  byId('delete').disabled = true;
+  try {
+    if (userId) {
+      if (operation === 'remove') {
+        await sync.remove(userId, id);
+      } else {
+        values = operation === 'insert'
+          ? await sync.insert(userId, {id, ...values})
+          : await sync.update(userId, id, values);
+      }
+      if (account?.id !== userId) return;
+      ++loadNumber;
+    } else {
+      items = readLocal();
+    }
+    const previous = items.find(item => item.id === id);
+    if (!userId && operation === 'update' && !previous) {
+      throw new Error('La actividad ya no existe.');
+    }
+    const next = items.filter(item => item.id !== id);
+    if (operation !== 'remove') next.push({...previous, id, ...values});
+    if (!userId) localStorage.setItem(key, JSON.stringify(next));
+    items = next;
+    message(target, '');
+    onDone?.();
+  } catch {
+    if (account?.id === userId) {
+      message(target, userId
+        ? 'No se pudo guardar el cambio en Supabase. Vuelve a intentarlo.'
+        : 'No se pudo guardar el cambio en este navegador.');
+    }
+  } finally {
+    busy = false;
+    byId('save').disabled = false;
+    byId('delete').disabled = false;
+    updateSyncControls();
+    render();
+    if (userId && account?.id === userId) reloadCloud();
+  }
 }
 function button(label, act) {
   const node = document.createElement('button');
@@ -139,9 +290,7 @@ function renderList(id, records, empty, showDate) {
     details.append(title, meta);
     row.append(details);
     if (item.type === 'task') {
-      const toggle = button(item.done ? '↶' : '✓', () => {
-        if (save(items.map(entry => entry.id === item.id ? {...entry, done: !entry.done} : entry))) render();
-      });
+      const toggle = button(item.done ? '↶' : '✓', () => mutate('update', item.id, {done: !item.done}));
       toggle.setAttribute('aria-label', (item.done ? 'Reabrir ' : 'Completar ') + item.title);
       row.append(toggle);
     }
@@ -152,6 +301,8 @@ function renderList(id, records, empty, showDate) {
   }
 }
 function render(focusDay = false) {
+  updateSyncControls();
+  byId('add').disabled = connecting;
   const now = dateKey(new Date());
   byId('month').textContent = monthFormat.format(visibleMonth);
   const year = visibleMonth.getFullYear();
@@ -189,6 +340,7 @@ function navigate(year, month) {
   render();
 }
 function openEditor(item = null) {
+  if (connecting || busy) return;
   editing = item;
   form.reset();
   form.elements.title.value = item?.title ?? '';
@@ -207,9 +359,8 @@ byId('next').onclick = () => navigate(visibleMonth.getFullYear(), visibleMonth.g
 byId('today').onclick = () => { visibleMonth = new Date(); selected = dateKey(visibleMonth); render(); };
 byId('cancel').onclick = () => editor.close();
 byId('delete').onclick = () => {
-  if (editing && confirm('¿Eliminar esta actividad?') && save(items.filter(item => item.id !== editing.id))) {
-    editor.close();
-    render();
+  if (editing && confirm('¿Eliminar esta actividad?')) {
+    mutate('remove', editing.id, null, () => editor.close());
   }
 };
 form.addEventListener('submit', event => {
@@ -217,21 +368,92 @@ form.addEventListener('submit', event => {
   const title = form.elements.title.value.trim();
   if (!title) { message('editor-error', 'Escribe un título.'); form.elements.title.focus(); return; }
   const type = form.elements.type.value;
-  const item = {
-    id: editing?.id ?? (globalThis.crypto?.randomUUID?.() ?? Date.now() + '-' + Math.random()),
-    title,
-    date: form.elements.date.value,
-    type,
-    important: form.elements.important.checked,
-    done: type === 'task' && (editing?.done ?? false)
-  };
-  const nextItems = editing ? items.map(entry => entry.id === item.id ? item : entry) : [...items, item];
-  if (!save(nextItems)) return;
-  selected = item.date;
-  visibleMonth = parseDate(selected);
-  editor.close();
-  render();
+  const id = editing?.id ?? (globalThis.crypto?.randomUUID?.() ?? Date.now() + '-' + Math.random());
+  const values = {title, date: form.elements.date.value, type, important: form.elements.important.checked};
+  if (!editing || type === 'event') values.done = false;
+  mutate(editing ? 'update' : 'insert', id, values, () => {
+    selected = values.date;
+    visibleMonth = parseDate(selected);
+    editor.close();
+  });
 });
+
+byId('account').onclick = async () => {
+  if (account) {
+    try {
+      await sync.signOut();
+    } catch {
+      message('notice', 'No se pudo cerrar sesión. Vuelve a intentarlo.');
+    }
+    return;
+  }
+  message('auth-message', '');
+  auth.showModal();
+};
+byId('auth-close').onclick = () => auth.close();
+byId('auth-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const submit = byId('auth-submit');
+  submit.disabled = true;
+  try {
+    await sync.signIn(event.target.elements.email.value.trim());
+    message('auth-message', 'Revisa tu correo y abre el enlace en este dispositivo.');
+  } catch {
+    message('auth-message', 'No se pudo enviar el enlace. Revisa el correo e inténtalo más tarde.');
+  } finally {
+    submit.disabled = false;
+  }
+});
+byId('import-local').onclick = async () => {
+  if (!account || busy || !confirm('¿Copiar los pendientes de este navegador a tu cuenta?')) return;
+  const userId = account.id;
+  busy = true;
+  updateSyncControls();
+  try {
+    const local = readLocal();
+    await sync.import(userId, local);
+    if (account?.id !== userId) return;
+    const imported = new Map(local.map(item => [item.id, JSON.stringify(item)]));
+    const remaining = readLocal().filter(item => imported.get(item.id) !== JSON.stringify(item));
+    localStorage.setItem(key, JSON.stringify(remaining));
+    message('notice', 'Se importaron los pendientes de este navegador.');
+  } catch {
+    if (account?.id === userId) message('notice', 'No se pudo terminar la importación. Puedes volver a intentarlo.');
+  } finally {
+    busy = false;
+    updateSyncControls();
+    reloadCloud();
+  }
+};
+
+window.addEventListener('storage', event => {
+  if (event.key !== key) return;
+  if (!account) {
+    loadLocal();
+    render();
+  } else {
+    updateSyncControls();
+  }
+});
+window.addEventListener('online', reloadCloud);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) reloadCloud();
+});
+if (window.connectCalendar) {
+  window.connectCalendar().then(connection => {
+    sync = connection;
+    // Supabase auth callbacks must return before using other client methods.
+    sync.onSession(session => setTimeout(() => changeSession(session?.user ?? null), 0));
+    setInterval(() => { if (!document.hidden) reloadCloud(); }, 60000);
+  }).catch(() => {
+    connecting = false;
+    message('notice', 'No se pudo conectar a Supabase. Puedes seguir usando el calendario en este navegador.');
+    loadLocal();
+    render();
+  });
+} else {
+  loadLocal();
+}
 render();
 </script>
 </body>
