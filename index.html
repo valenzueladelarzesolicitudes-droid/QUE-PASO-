@@ -50,7 +50,7 @@ button:disabled { cursor: default; opacity: .65 }
   <div id="sync-controls" hidden>
     <p id="sync-status" role="status"></p>
     <button id="import-local" type="button" hidden>Importar pendientes de este navegador</button>
-    <button id="account" type="button">Sincronizar</button>
+    <button id="account" type="button">Iniciar sesión</button>
   </div>
   <p id="notice" role="status" hidden></p>
   <p id="cloud-error" role="status" hidden></p>
@@ -78,8 +78,8 @@ button:disabled { cursor: default; opacity: .65 }
 </dialog>
 <dialog id="auth" aria-labelledby="auth-title">
   <form id="auth-form">
-    <h2 id="auth-title">Sincroniza tu calendario</h2>
-    <p>Usa el mismo correo en el celular y el computador.</p>
+    <h2 id="auth-title">Iniciar sesión</h2>
+    <p>Te enviaremos un enlace de acceso. Usa el mismo correo en el celular y el computador.</p>
     <label>Correo electrónico<input name="email" type="email" autocomplete="email" required></label>
     <p id="auth-message" role="status" hidden></p>
     <div class="actions"><button type="button" id="auth-close">Cerrar</button><button class="primary" id="auth-submit">Enviar enlace</button></div>
@@ -143,7 +143,7 @@ function updateSyncControls() {
   byId('sync-controls').hidden = false;
   const accountButton = byId('account');
   accountButton.disabled = connecting || !sync || busy;
-  accountButton.textContent = account ? 'Cerrar sesión' : 'Sincronizar';
+  accountButton.textContent = account ? 'Cerrar sesión' : 'Iniciar sesión';
   const status = account
     ? (live ? 'Sincronización en tiempo real activa' : 'Reconectando la sincronización') + ' · ' + account.email
     : connecting ? 'Conectando con Supabase…' : 'Solo en este navegador';
