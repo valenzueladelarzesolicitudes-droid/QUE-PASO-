@@ -28,7 +28,9 @@
     const owned = (query, userId) => query.eq('user_id', userId);
     return {
       onSession: callback => client.auth.onAuthStateChange((event, session) => callback(session)),
-      signIn: email => client.auth.signInWithOtp({
+      signIn: (email, password) => client.auth.signInWithPassword({email, password}).then(result),
+      updatePassword: password => client.auth.updateUser({password}).then(result),
+      sendAccessLink: email => client.auth.signInWithOtp({
         email,
         options: {
           shouldCreateUser: false,

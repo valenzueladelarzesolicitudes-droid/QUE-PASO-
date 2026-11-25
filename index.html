@@ -39,7 +39,7 @@ input:not([type="checkbox"]), select { width: 100%; min-width: 0; min-height: 44
 #sync-controls { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-top: .75rem }
 #sync-controls[hidden] { display: none }
 #sync-status { flex: 1 1 12rem; margin: .25rem 0; overflow-wrap: anywhere; color: #525777 }
-#auth-message { margin: 0; overflow-wrap: anywhere }
+#auth-message, #password-message { margin: 0; overflow-wrap: anywhere }
 button:disabled { cursor: default; opacity: .65 }
 @media (max-width: 420px) { .toolbar { flex-wrap: wrap } }
 </style>
@@ -50,6 +50,7 @@ button:disabled { cursor: default; opacity: .65 }
   <div id="sync-controls" hidden>
     <p id="sync-status" role="status"></p>
     <button id="import-local" type="button" hidden>Importar pendientes de este navegador</button>
+    <button id="change-password" type="button" hidden>Cambiar contraseña</button>
     <button id="account" type="button">Iniciar sesión</button>
   </div>
   <p id="notice" role="status" hidden></p>
@@ -80,14 +81,24 @@ button:disabled { cursor: default; opacity: .65 }
 <dialog id="auth" aria-labelledby="auth-title">
   <form id="auth-form">
     <h2 id="auth-title">Iniciar sesión</h2>
-    <p>Te enviaremos un enlace de acceso. Usa el mismo correo en el celular y el computador.</p>
-    <label>Correo electrónico<input name="email" type="email" autocomplete="email" required></label>
+    <label>Correo electrónico<input name="email" type="email" autocomplete="username" required></label>
+    <label>Contraseña<input name="password" type="password" autocomplete="current-password" required></label>
     <p id="auth-message" role="status" hidden></p>
-    <div class="actions"><button type="button" id="auth-close">Cerrar</button><button class="primary" id="auth-submit">Enviar enlace</button></div>
+    <div class="actions"><button type="button" id="auth-close">Cerrar</button><button class="primary" id="auth-submit">Entrar</button></div>
+    <button type="button" id="send-access-link">Configurar o recuperar contraseña por correo</button>
+  </form>
+</dialog>
+<dialog id="password-editor" aria-labelledby="password-title">
+  <form id="password-form">
+    <h2 id="password-title">Cambiar contraseña</h2>
+    <label>Nueva contraseña (mínimo 8 caracteres)<input name="newPassword" type="password" autocomplete="new-password" minlength="8" required></label>
+    <label>Repite la contraseña<input name="confirmation" type="password" autocomplete="new-password" minlength="8" required></label>
+    <p id="password-message" role="status" hidden></p>
+    <div class="actions"><button type="button" id="password-close">Cancelar</button><button class="primary" id="password-submit">Guardar contraseña</button></div>
   </form>
 </dialog>
 <script src="./calendar-config.js"></script>
-<script src="./calendar-sync.js?v=2"></script>
+<script src="./calendar-sync.js?v=3"></script>
 <script>
 const byId = id => document.getElementById(id);
 const key = 'mi-calendario.v1';
@@ -124,9 +135,22 @@ let busy = false;
 let loadNumber = 0;
 let connecting = Boolean(window.connectCalendar);
 const auth = byId('auth');
+const authForm = byId('auth-form');
+const passwordEditor = byId('password-editor');
+const passwordForm = byId('password-form');
 
 function accessError(error) {
   switch (error?.code) {
+    case 'invalid_credentials':
+      return 'El correo o la contraseña son incorrectos. Si aún no tienes contraseña, configúrala por correo.';
+    case 'email_not_confirmed':
+      return 'Tu correo aún debe confirmarse en Supabase.';
+    case 'weak_password':
+      return 'La contraseña no cumple los requisitos de Supabase. Prueba con una más larga y única.';
+    case 'same_password':
+      return 'Elige una contraseña distinta de la actual.';
+    case 'reauthentication_needed':
+      return 'Para cambiar la contraseña, cierra sesión y pide un nuevo enlace de acceso.';
     case 'email_address_invalid':
     case 'validation_failed':
       return 'Revisa que el correo esté bien escrito, incluido el dominio (por ejemplo, gmail.com).';
@@ -175,6 +199,9 @@ function updateSyncControls() {
   const accountButton = byId('account');
   accountButton.disabled = connecting || !sync || busy;
   accountButton.textContent = account ? 'Cerrar sesión' : 'Iniciar sesión';
+  const passwordButton = byId('change-password');
+  passwordButton.hidden = !account;
+  passwordButton.disabled = busy;
   let status = connecting ? 'Conectando con Supabase…' : 'Solo en este navegador';
   if (account) {
     if (cloudStatus === 'loading') status = 'Cargando pendientes de la cuenta…';
@@ -231,6 +258,7 @@ async function changeSession(user) {
   if (user) message('auth-link-error', '');
   if (editor.open) editor.close();
   if (auth.open) auth.close();
+  if (passwordEditor.open) passwordEditor.close();
   message('notice', '');
   message('cloud-error', '');
   items = [];
@@ -432,15 +460,66 @@ byId('account').onclick = async () => {
   auth.showModal();
 };
 byId('auth-close').onclick = () => auth.close();
-byId('auth-form').addEventListener('submit', async event => {
-  event.preventDefault();
+auth.addEventListener('close', () => { authForm.elements.password.value = ''; });
+
+async function submitAccess(operation) {
   const submit = byId('auth-submit');
+  const link = byId('send-access-link');
   submit.disabled = true;
+  link.disabled = true;
+  message('auth-message', '');
   try {
-    await sync.signIn(event.target.elements.email.value.trim());
-    message('auth-message', 'Revisa tu correo y abre el enlace en este dispositivo.');
+    await operation();
   } catch (error) {
     message('auth-message', accessError(error));
+  } finally {
+    submit.disabled = false;
+    link.disabled = false;
+  }
+}
+
+authForm.addEventListener('submit', event => {
+  event.preventDefault();
+  const {email, password} = authForm.elements;
+  submitAccess(() => sync.signIn(email.value.trim(), password.value));
+});
+byId('send-access-link').onclick = () => {
+  const email = authForm.elements.email;
+  if (!email.reportValidity()) return;
+  submitAccess(async () => {
+    await sync.sendAccessLink(email.value.trim());
+    message('auth-message', 'Abre el enlace en este navegador. Luego pulsa Cambiar contraseña en el calendario.');
+  });
+};
+
+byId('change-password').onclick = () => {
+  if (!account) return;
+  passwordForm.reset();
+  message('password-message', '');
+  passwordEditor.showModal();
+};
+byId('password-close').onclick = () => passwordEditor.close();
+passwordEditor.addEventListener('close', () => passwordForm.reset());
+passwordForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const userId = account?.id;
+  if (!userId) return;
+  const {newPassword, confirmation} = passwordForm.elements;
+  if (newPassword.value !== confirmation.value) {
+    message('password-message', 'Las dos contraseñas deben ser iguales.');
+    confirmation.focus();
+    return;
+  }
+  const submit = byId('password-submit');
+  submit.disabled = true;
+  message('password-message', '');
+  try {
+    await sync.updatePassword(newPassword.value);
+    if (account?.id !== userId) return;
+    passwordEditor.close();
+    message('notice', 'Contraseña guardada. Ya puedes usarla para entrar desde el otro dispositivo.');
+  } catch (error) {
+    if (account?.id === userId) message('password-message', accessError(error));
   } finally {
     submit.disabled = false;
   }
