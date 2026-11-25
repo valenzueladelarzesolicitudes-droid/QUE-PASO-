@@ -25,7 +25,48 @@
     await loadClient();
     const client = window.supabase.createClient(url, publishableKey);
     const table = () => client.from('calendar_items');
+    const supplierTable = () => client.from('supplier_orders');
+    const supplierFields = 'id,supplier,month,year,order_number,invoice_number,status,received_on,notes';
+
+    async function subscribe(topic, onChange, onStatus) {
+      await client.realtime.setAuth();
+      const channel = client.channel(topic, {config: {private: true}})
+        .on('broadcast', {event: 'changed'}, onChange)
+        .subscribe(onStatus);
+      return () => client.removeChannel(channel);
+    }
+
+    async function readRecords(tableForRead, columns) {
+      const rows = [];
+      let lastId;
+      while (true) {
+        let query = tableForRead().select(columns).order('id').limit(500);
+        if (lastId !== undefined) query = query.gt('id', lastId);
+        const page = result(await query);
+        if (!page.length) return rows;
+        rows.push(...page);
+        lastId = page[page.length - 1].id;
+      }
+    }
+
     return {
+      suppliers: {
+        subscribe: (onChange, onStatus) => subscribe('suppliers:shared', onChange, onStatus),
+        read: () => readRecords(supplierTable, supplierFields),
+        async save(values, id) {
+          const query = id ? supplierTable().update(values).eq('id', id) : supplierTable().insert(values);
+          return result(await query.select(supplierFields).single());
+        },
+        async remove(id) {
+          result(await supplierTable().delete().eq('id', id).select('id').single());
+        },
+        async import(records) {
+          return result(await supplierTable().upsert(records, {
+            onConflict: 'source_key',
+            ignoreDuplicates: true
+          }).select(supplierFields));
+        }
+      },
       onSession: callback => client.auth.onAuthStateChange((event, session) => callback(session)),
       signIn: (email, password) => client.auth.signInWithPassword({email, password}).then(result),
       updatePassword: password => client.auth.updateUser({password}).then(result),
@@ -37,25 +78,8 @@
         }
       }).then(result),
       signOut: () => client.auth.signOut({scope: 'local'}).then(result),
-      async subscribe(onChange, onStatus) {
-        await client.realtime.setAuth();
-        const channel = client.channel('calendar:shared', {config: {private: true}})
-          .on('broadcast', {event: 'changed'}, onChange)
-          .subscribe(onStatus);
-        return () => client.removeChannel(channel);
-      },
-      async read() {
-        const rows = [];
-        let lastId;
-        while (true) {
-          let query = table().select(fields).order('id').limit(500);
-          if (lastId !== undefined) query = query.gt('id', lastId);
-          const page = result(await query);
-          if (!page.length) return rows;
-          rows.push(...page);
-          lastId = page[page.length - 1].id;
-        }
-      },
+      subscribe: (onChange, onStatus) => subscribe('calendar:shared', onChange, onStatus),
+      read: () => readRecords(table, fields),
       async insert(item) {
         return result(await table().insert(item).select(fields).single());
       },

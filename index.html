@@ -18,6 +18,7 @@
   })();
 </script>
 <link rel="stylesheet" href="./calendar.css?v=2">
+<link rel="stylesheet" href="./supplier-control.css">
 </head>
 <body>
 <header class="app-header">
@@ -47,7 +48,11 @@
   <p id="notice" role="status" hidden></p>
   <p id="cloud-error" role="status" hidden></p>
   <p id="auth-link-error" role="status" hidden></p>
-  <div class="workspace">
+  <nav class="app-nav" aria-label="Secciones de Mi calendario">
+    <button type="button" id="calendar-nav" aria-controls="calendar-view" aria-pressed="true">Calendario</button>
+    <button type="button" id="suppliers-nav" aria-controls="suppliers-view" aria-pressed="false">Proveedores y facturas</button>
+  </nav>
+  <div class="workspace" id="calendar-view">
     <section class="panel calendar-panel" aria-labelledby="month">
       <div class="toolbar">
         <h2 id="month" class="month" aria-live="polite"></h2>
@@ -71,6 +76,33 @@
       </section>
     </div>
   </div>
+  <section id="suppliers-view" aria-labelledby="suppliers-title" hidden>
+    <header class="supplier-header">
+      <h2 id="suppliers-title">Proveedores, OC y facturas</h2>
+      <div class="supplier-actions" id="supplier-actions" hidden>
+        <button type="button" id="supplier-import">Importar Excel</button>
+        <button type="button" class="primary" id="supplier-add">+ Nuevo registro</button>
+      </div>
+    </header>
+    <div class="panel supplier-panel" id="supplier-locked">
+      <p>Inicia sesión para acceder a las órdenes de compra y facturas.</p>
+      <button type="button" id="supplier-login">Iniciar sesión</button>
+    </div>
+    <p class="supplier-message" id="supplier-message" role="status" hidden></p>
+    <div id="supplier-content" hidden>
+      <div class="supplier-stats" id="supplier-stats" aria-label="Filtrar por estado"></div>
+      <div class="panel supplier-panel">
+        <div class="supplier-filters">
+          <label>Buscar<input type="search" id="supplier-search" placeholder="Proveedor, OC o factura"></label>
+          <label>Año<select id="supplier-year"></select></label>
+          <label>Mes<select id="supplier-month"></select></label>
+          <label>Estado<select id="supplier-status"></select></label>
+        </div>
+        <p class="supplier-count" id="supplier-count" aria-live="polite"></p>
+        <div id="supplier-records" class="supplier-records"></div>
+      </div>
+    </div>
+  </section>
 </main>
 <dialog id="editor" aria-labelledby="editor-title">
   <form id="form">
@@ -110,8 +142,44 @@
     <div class="actions"><button type="button" id="password-close">Cancelar</button><button class="primary" id="password-submit">Guardar contraseña</button></div>
   </form>
 </dialog>
+<dialog id="supplier-editor" aria-labelledby="supplier-editor-title">
+  <form id="supplier-form">
+    <h2 id="supplier-editor-title">Nuevo registro</h2>
+    <label>Proveedor<input name="supplier" list="supplier-names" maxlength="180" required></label>
+    <datalist id="supplier-names"></datalist>
+    <div class="supplier-form-grid">
+      <label>Mes<select name="month" required></select></label>
+      <label>Año<input name="year" type="number" min="1900" max="9999" required></label>
+      <label>N.º de OC<input name="order_number" maxlength="100"></label>
+      <label>N.º de factura<input name="invoice_number" maxlength="100"></label>
+    </div>
+    <label>Estado<select name="status"></select></label>
+    <label>Fecha de recepción<input name="received_on" type="date" min="0001-01-01" max="9999-12-31"></label>
+    <label>Observaciones<textarea name="notes" maxlength="2000" rows="3"></textarea></label>
+    <p class="supplier-error" id="supplier-editor-error" role="status" hidden></p>
+    <div class="actions">
+      <button type="button" id="supplier-delete" hidden>Eliminar</button>
+      <button type="button" id="supplier-cancel">Cancelar</button>
+      <button type="submit" class="primary" id="supplier-save">Guardar</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="supplier-import-dialog" aria-labelledby="supplier-import-title">
+  <form id="supplier-import-form">
+    <h2 id="supplier-import-title">Importar Excel</h2>
+    <label>Planilla de control (.xlsx)<input name="workbook" type="file" accept=".xlsx" required></label>
+    <p id="supplier-import-preview" role="status" hidden></p>
+    <p class="supplier-error" id="supplier-import-error" role="status" hidden></p>
+    <div class="actions">
+      <button type="button" id="supplier-import-cancel">Cerrar</button>
+      <button type="button" id="supplier-preview">Revisar archivo</button>
+      <button type="submit" class="primary" id="supplier-import-submit" disabled>Importar registros</button>
+    </div>
+  </form>
+</dialog>
 <script src="./calendar-config.js"></script>
-<script src="./calendar-sync.js?v=4"></script>
+<script src="./calendar-sync.js?v=5"></script>
+<script src="./supplier-control.js"></script>
 <script>
 const byId = id => document.getElementById(id);
 const key = 'mi-calendario.v1';
@@ -299,6 +367,7 @@ async function changeSession(user) {
   items = [];
   if (!user) loadLocal();
   render();
+  window.supplierControl?.setSession(user?.id, sync?.suppliers);
   if (!user) return;
 
   reloadCloud();
