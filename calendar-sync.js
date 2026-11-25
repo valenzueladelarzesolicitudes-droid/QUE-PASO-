@@ -30,7 +30,10 @@
       onSession: callback => client.auth.onAuthStateChange((event, session) => callback(session)),
       signIn: email => client.auth.signInWithOtp({
         email,
-        options: {emailRedirectTo: new URL(location.pathname, location.origin).href}
+        options: {
+          shouldCreateUser: false,
+          emailRedirectTo: new URL('./', location.href).href
+        }
       }).then(result),
       signOut: () => client.auth.signOut({scope: 'local'}).then(result),
       async subscribe(userId, onChange, onStatus) {

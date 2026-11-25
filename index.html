@@ -35,7 +35,7 @@ label { display: grid; gap: .3rem }
 label.check { display: flex; align-items: center }
 input:not([type="checkbox"]), select { width: 100%; min-width: 0; min-height: 44px; padding: .5rem; border: 1px solid #acb0ca; border-radius: .5rem; background: white; color: inherit }
 .actions { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: flex-end }
-#notice, #cloud-error, #editor-error { color: #8f211e }
+#notice, #cloud-error, #editor-error, #auth-link-error { color: #8f211e }
 #sync-controls { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-top: .75rem }
 #sync-controls[hidden] { display: none }
 #sync-status { flex: 1 1 12rem; margin: .25rem 0; overflow-wrap: anywhere; color: #525777 }
@@ -54,6 +54,7 @@ button:disabled { cursor: default; opacity: .65 }
   </div>
   <p id="notice" role="status" hidden></p>
   <p id="cloud-error" role="status" hidden></p>
+  <p id="auth-link-error" role="status" hidden></p>
   <section aria-labelledby="month">
     <div class="toolbar">
       <h2 id="month" class="month" aria-live="polite"></h2>
@@ -86,7 +87,7 @@ button:disabled { cursor: default; opacity: .65 }
   </form>
 </dialog>
 <script src="./calendar-config.js"></script>
-<script src="./calendar-sync.js"></script>
+<script src="./calendar-sync.js?v=2"></script>
 <script>
 const byId = id => document.getElementById(id);
 const key = 'mi-calendario.v1';
@@ -118,10 +119,40 @@ let sync;
 let account = null;
 let stopUpdates;
 let live = false;
+let cloudStatus = 'loading';
 let busy = false;
 let loadNumber = 0;
 let connecting = Boolean(window.connectCalendar);
 const auth = byId('auth');
+
+function accessError(error) {
+  switch (error?.code) {
+    case 'email_address_invalid':
+    case 'validation_failed':
+      return 'Revisa que el correo esté bien escrito, incluido el dominio (por ejemplo, gmail.com).';
+    case 'email_address_not_authorized':
+      return 'El servicio de correo de Supabase no puede enviar enlaces a esta dirección. Usa el correo autorizado en el proyecto.';
+    case 'user_not_found':
+    case 'signup_disabled':
+      return 'Este correo todavía no tiene acceso. Revisa que figure en Authentication → Users en Supabase.';
+    case 'over_email_send_rate_limit':
+    case 'over_request_rate_limit':
+      return 'Supabase limitó el envío de enlaces. Espera antes de volver a intentarlo.';
+    case 'otp_expired':
+      return 'El enlace caducó o ya se usó. Pide un enlace nuevo en este dispositivo.';
+    default:
+      if (error?.status === 429) return 'Hay demasiadas solicitudes. Espera antes de pedir otro enlace.';
+      if (error?.name === 'AuthRetryableFetchError') return 'No se pudo contactar a Supabase. Revisa tu conexión e inténtalo de nuevo.';
+      return 'Supabase no pudo completar el acceso. Revisa Authentication → Logs en el proyecto para ver el motivo.';
+  }
+}
+
+const linkParams = new URLSearchParams(location.hash.slice(1));
+const queryParams = new URLSearchParams(location.search);
+const linkError = linkParams.get('error_code') || queryParams.get('error_code');
+if (linkError) {
+  message('auth-link-error', accessError({code: linkError}));
+}
 
 function readLocal() {
   const stored = JSON.parse(localStorage.getItem(key) ?? '[]');
@@ -144,9 +175,13 @@ function updateSyncControls() {
   const accountButton = byId('account');
   accountButton.disabled = connecting || !sync || busy;
   accountButton.textContent = account ? 'Cerrar sesión' : 'Iniciar sesión';
-  const status = account
-    ? (live ? 'Sincronización en tiempo real activa' : 'Reconectando la sincronización') + ' · ' + account.email
-    : connecting ? 'Conectando con Supabase…' : 'Solo en este navegador';
+  let status = connecting ? 'Conectando con Supabase…' : 'Solo en este navegador';
+  if (account) {
+    if (cloudStatus === 'loading') status = 'Cargando pendientes de la cuenta…';
+    else if (cloudStatus === 'error') status = 'Sesión iniciada. Error al cargar pendientes.';
+    else status = live ? 'Sincronización en tiempo real activa' : 'Pendientes cargados. Reconectando en tiempo real…';
+    status += ' · ' + account.email;
+  }
   message('sync-status', status);
   const importButton = byId('import-local');
   importButton.hidden = true;
@@ -168,11 +203,14 @@ async function reloadCloud() {
     const data = await sync.read(userId);
     if (request !== loadNumber || account?.id !== userId) return;
     items = data;
+    cloudStatus = 'ready';
     message('cloud-error', '');
     render();
   } catch {
     if (request === loadNumber && account?.id === userId) {
-      message('cloud-error', 'No se pudo actualizar el calendario. Se volverá a intentar.');
+      cloudStatus = 'error';
+      updateSyncControls();
+      message('cloud-error', 'No se pudieron cargar tus pendientes desde Supabase. Se volverá a intentar.');
     }
   }
 }
@@ -189,6 +227,8 @@ async function changeSession(user) {
   stopUpdates = undefined;
   account = user;
   live = false;
+  cloudStatus = 'loading';
+  if (user) message('auth-link-error', '');
   if (editor.open) editor.close();
   if (auth.open) auth.close();
   message('notice', '');
@@ -387,6 +427,7 @@ byId('account').onclick = async () => {
     }
     return;
   }
+  message('auth-link-error', '');
   message('auth-message', '');
   auth.showModal();
 };
@@ -398,8 +439,8 @@ byId('auth-form').addEventListener('submit', async event => {
   try {
     await sync.signIn(event.target.elements.email.value.trim());
     message('auth-message', 'Revisa tu correo y abre el enlace en este dispositivo.');
-  } catch {
-    message('auth-message', 'No se pudo enviar el enlace. Revisa el correo e inténtalo más tarde.');
+  } catch (error) {
+    message('auth-message', accessError(error));
   } finally {
     submit.disabled = false;
   }
