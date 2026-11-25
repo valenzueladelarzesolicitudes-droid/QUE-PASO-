@@ -17,7 +17,7 @@
       : window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   })();
 </script>
-<link rel="stylesheet" href="./calendar.css?v=2">
+<link rel="stylesheet" href="./calendar.css?v=3">
 <link rel="stylesheet" href="./supplier-control.css">
 </head>
 <body>
@@ -74,6 +74,10 @@
         <div class="panel-heading"><h2 id="upcoming">Próximas actividades</h2><span class="counter" id="agenda-count" hidden></span></div>
         <div id="agenda"></div>
       </section>
+      <section class="panel agenda-panel completed-panel" aria-labelledby="completed-title">
+        <div class="panel-heading"><h2 id="completed-title">Pendientes completados</h2><span class="counter" id="completed-count" hidden></span></div>
+        <div id="completed"></div>
+      </section>
     </div>
   </div>
   <section id="suppliers-view" aria-labelledby="suppliers-title" hidden>
@@ -111,6 +115,7 @@
     <label>Fecha<input name="date" type="date" min="0001-01-01" max="9999-12-31" required></label>
     <label>Tipo<select name="type"><option value="task">Pendiente</option><option value="event">Evento</option></select></label>
     <label class="check"><input name="important" type="checkbox"> Importante</label>
+    <label class="check" id="done-field"><input name="done" type="checkbox"> Completado</label>
     <p id="editor-error" role="status" hidden></p>
     <div class="actions"><button type="button" id="delete" hidden>Eliminar</button><button type="button" id="cancel">Cancelar</button><button class="primary" id="save">Guardar</button></div>
   </form>
@@ -465,6 +470,7 @@ function renderList(id, records, empty, showDate) {
     if (item.type === 'task') {
       const toggle = button(item.done ? '↶' : '✓', () => mutate('update', item.id, {done: !item.done}));
       toggle.className = 'complete-task';
+      toggle.title = item.done ? 'Reabrir pendiente' : 'Marcar como completado';
       toggle.setAttribute('aria-label', (item.done ? 'Reabrir ' : 'Completar ') + item.title);
       row.append(toggle);
     }
@@ -555,13 +561,17 @@ function render(focusDay = false) {
     if (value === focusDate) day.focus();
   }
   byId('selected').textContent = capitalize(dayFormat.format(parseDate(selected)));
-  const selectedItems = byDate.get(selected) ?? [];
+  const selectedItems = (byDate.get(selected) ?? []).filter(item => !item.done);
   countLabel('entry-count', selectedItems.length);
-  renderList('entries', selectedItems, 'Sin actividades para este día.', false);
+  renderList('entries', selectedItems, 'Sin pendientes ni eventos para este día.', false);
   const upcoming = items.filter(item => !item.done && item.date >= now)
     .sort((a, b) => a.date.localeCompare(b.date) || Number(b.important) - Number(a.important));
   countLabel('agenda-count', upcoming.length);
   renderList('agenda', upcoming, 'Sin próximos pendientes ni eventos.', true);
+  const completed = items.filter(item => item.type === 'task' && item.done)
+    .sort((a, b) => b.date.localeCompare(a.date));
+  countLabel('completed-count', completed.length);
+  renderList('completed', completed, 'Todavía no hay pendientes completados.', true);
 }
 
 const dayOffsets = {ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7};
@@ -582,6 +592,10 @@ function navigate(year, month) {
   selected = dateKey(visibleMonth);
   render();
 }
+function updateDoneField() {
+  byId('done-field').hidden = form.elements.type.value !== 'task';
+}
+
 function openEditor(item = null) {
   if (connecting || busy) return;
   editing = item;
@@ -590,6 +604,8 @@ function openEditor(item = null) {
   form.elements.date.value = item?.date ?? selected;
   form.elements.type.value = item?.type ?? 'task';
   form.elements.important.checked = item?.important ?? false;
+  form.elements.done.checked = item?.done ?? false;
+  updateDoneField();
   byId('editor-title').textContent = item ? 'Editar actividad' : 'Agregar al calendario';
   byId('delete').hidden = !item;
   message('editor-error', '');
@@ -601,6 +617,7 @@ byId('prev').onclick = () => navigate(visibleMonth.getFullYear(), visibleMonth.g
 byId('next').onclick = () => navigate(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1);
 byId('today').onclick = () => { visibleMonth = new Date(); selected = dateKey(visibleMonth); render(); };
 byId('cancel').onclick = () => editor.close();
+form.elements.type.addEventListener('change', updateDoneField);
 byId('delete').onclick = () => {
   if (editing && confirm('¿Eliminar esta actividad?')) {
     mutate('remove', editing.id, null, () => editor.close());
@@ -613,7 +630,8 @@ form.addEventListener('submit', event => {
   const type = form.elements.type.value;
   const id = editing?.id ?? (globalThis.crypto?.randomUUID?.() ?? Date.now() + '-' + Math.random());
   const values = {title, date: form.elements.date.value, type, important: form.elements.important.checked};
-  if (!editing || type === 'event') values.done = false;
+  const done = type === 'task' && form.elements.done.checked;
+  if (!editing || type === 'event' || done !== Boolean(editing.done)) values.done = done;
   mutate(editing ? 'update' : 'insert', id, values, () => {
     selected = values.date;
     visibleMonth = parseDate(selected);
