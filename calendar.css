@@ -96,38 +96,11 @@ h2 { font-size: 1.16rem; line-height: 1.2; letter-spacing: -.025em }
 }
 .brand { gap: .72rem }
 .brand-mark {
+  display: block;
   width: 2.55rem;
+  height: auto;
   aspect-ratio: 1;
-  display: grid;
-  place-items: center;
   flex: none;
-  border-radius: .84rem;
-  background: var(--accent-soft);
-  color: var(--accent-text);
-}
-.calendar-icon {
-  position: relative;
-  width: 1.15rem;
-  height: 1.05rem;
-  border: 2px solid currentColor;
-  border-radius: .23rem;
-}
-.calendar-icon::before {
-  content: "";
-  position: absolute;
-  inset: .19rem 0 auto;
-  border-top: 2px solid currentColor;
-}
-.calendar-icon::after {
-  content: "";
-  position: absolute;
-  top: -.29rem;
-  left: .19rem;
-  width: .13rem;
-  height: .32rem;
-  background: currentColor;
-  border-radius: .1rem;
-  box-shadow: .43rem 0 currentColor;
 }
 .header-actions { justify-content: flex-end }
 #add { white-space: nowrap; padding-inline: 1rem }
@@ -373,7 +346,7 @@ input:not([type="checkbox"]), select {
   .header-inner, main { width: calc(100% - 1.25rem) }
   .header-inner { min-height: 4.5rem; gap: .45rem; flex-wrap: wrap }
   .brand { gap: .48rem }
-  .brand-mark { width: 1.9rem; border-radius: .63rem }
+  .brand-mark { width: 1.9rem }
   .header-actions { gap: .15rem; margin-inline-start: auto }
   .theme-switch { padding-inline: .28rem }
   #add { padding-inline: .54rem; font-size: .86rem }

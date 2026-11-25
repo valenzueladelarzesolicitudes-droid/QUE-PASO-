@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#f3f1f8">
 <title>Mi calendario</title>
+<link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="./assets/apple-touch-icon.png">
+<link rel="manifest" href="./calendar.webmanifest">
 <script>
   (() => {
     let preference;
@@ -14,13 +17,13 @@
       : window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   })();
 </script>
-<link rel="stylesheet" href="./calendar.css?v=1">
+<link rel="stylesheet" href="./calendar.css?v=2">
 </head>
 <body>
 <header class="app-header">
   <div class="header-inner">
     <div class="brand">
-      <span class="brand-mark" aria-hidden="true"><span class="calendar-icon"></span></span>
+      <img class="brand-mark" src="./assets/logo.png" width="96" height="96" alt="">
       <h1>Mi calendario</h1>
     </div>
     <div class="header-actions">
