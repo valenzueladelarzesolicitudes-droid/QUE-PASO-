@@ -34,6 +34,45 @@ form { display: grid; gap: .9rem }
 label { display: grid; gap: .3rem }
 label.check { display: flex; align-items: center }
 input:not([type="checkbox"]), select { width: 100%; min-width: 0; min-height: 44px; padding: .5rem; border: 1px solid #acb0ca; border-radius: .5rem; background: white; color: inherit }
+.password-field { display: grid; gap: .3rem }
+.password-input { position: relative }
+.password-input input { padding-inline-end: 3.25rem }
+.password-toggle {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  width: 44px;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: transparent;
+}
+.password-eye {
+  display: grid;
+  place-items: center;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid currentColor;
+  border-radius: 75% 10%;
+  transform: rotate(45deg);
+}
+.password-eye::after {
+  content: "";
+  width: .36rem;
+  height: .36rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+.password-toggle[data-visible]::after {
+  content: "";
+  position: absolute;
+  width: 1.35rem;
+  height: 2px;
+  background: currentColor;
+  box-shadow: 0 -2px white;
+  transform: rotate(-45deg);
+}
 .actions { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: flex-end }
 #notice, #cloud-error, #editor-error, #auth-link-error { color: #8f211e }
 #sync-controls { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-top: .75rem }
@@ -82,7 +121,15 @@ button:disabled { cursor: default; opacity: .65 }
   <form id="auth-form">
     <h2 id="auth-title">Iniciar sesión</h2>
     <label>Correo electrónico<input name="email" type="email" autocomplete="username" required></label>
-    <label>Contraseña<input name="password" type="password" autocomplete="current-password" required></label>
+    <div class="password-field">
+      <label for="login-password">Contraseña</label>
+      <div class="password-input">
+        <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+        <button type="button" class="password-toggle" id="toggle-password" aria-label="Mostrar contraseña" aria-controls="login-password">
+          <span class="password-eye" aria-hidden="true"></span>
+        </button>
+      </div>
+    </div>
     <p id="auth-message" role="status" hidden></p>
     <div class="actions"><button type="button" id="auth-close">Cerrar</button><button class="primary" id="auth-submit">Entrar</button></div>
     <button type="button" id="send-access-link">Configurar o recuperar contraseña por correo</button>
@@ -460,7 +507,20 @@ byId('account').onclick = async () => {
   auth.showModal();
 };
 byId('auth-close').onclick = () => auth.close();
-auth.addEventListener('close', () => { authForm.elements.password.value = ''; });
+const loginPassword = byId('login-password');
+const passwordToggle = byId('toggle-password');
+
+function showLoginPassword(visible) {
+  loginPassword.type = visible ? 'text' : 'password';
+  passwordToggle.toggleAttribute('data-visible', visible);
+  passwordToggle.setAttribute('aria-label', visible ? 'Ocultar contraseña' : 'Mostrar contraseña');
+}
+
+passwordToggle.onclick = () => showLoginPassword(loginPassword.type === 'password');
+auth.addEventListener('close', () => {
+  loginPassword.value = '';
+  showLoginPassword(false);
+});
 
 async function submitAccess(operation) {
   const submit = byId('auth-submit');
