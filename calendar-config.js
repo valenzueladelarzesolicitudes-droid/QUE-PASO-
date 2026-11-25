@@ -1,5 +1,5 @@
-// Use the Supabase Project URL and its public publishable key.
+// Public configuration used by the browser.
 window.calendarConfig = {
-  url: '',
-  publishableKey: ''
+  url: 'https://lctugtrpbwhnpkmaqcsy.supabase.co',
+  publishableKey: 'sb_publishable_wzXaGBUt3LNnVqnORwdnGA_oO-OQwPx'
 };
